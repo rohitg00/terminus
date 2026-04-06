@@ -1,11 +1,11 @@
 import { chromium, type Browser } from "playwright";
-import { writeFile, mkdir } from "node:fs/promises";
-import { readFile } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { Liquid } from "liquidjs";
+import type { DeviceModel } from "./types.js";
 
 const execFile = promisify(execFileCb);
 const liquid = new Liquid();
@@ -27,24 +27,20 @@ async function getBrowser(): Promise<Browser> {
   return launching;
 }
 
-export interface RenderOptions {
-  width: number;
-  height: number;
-  bitDepth: number;
-  rotation?: number;
-  format?: "bmp" | "png";
-  dither?: boolean;
-}
-
 export async function renderScreen(
   template: string,
   data: Record<string, unknown>,
-  opts: RenderOptions,
+  model: DeviceModel,
+  screenName: string,
 ): Promise<{ path: string; checksum: string }> {
   await mkdir(SCREENS_DIR, { recursive: true });
 
   const html = await liquid.parseAndRender(template, data);
-  const { width, height } = opts;
+  const { width, height } = model;
+
+  const orientation = model.rotation === 0 ? "landscape" : "portrait";
+  const bitClass = `screen--${model.bitDepth}bit`;
+  const cssClasses = `screen screen--${model.name} ${bitClass} screen--${orientation}`;
 
   const fullHtml = `<!DOCTYPE html>
 <html><head>
@@ -57,7 +53,7 @@ ${FRAMEWORK_CSS ? `<link rel="stylesheet" href="${encodeURI(FRAMEWORK_CSS)}">` :
   body { width: ${width}px; height: ${height}px; background: #fff; color: #000;
          font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
 </style>
-</head><body>${html}</body></html>`;
+</head><body class="${cssClasses}">${html}</body></html>`;
 
   const b = await getBrowser();
   const page = await b.newPage({ viewport: { width, height } });
@@ -72,14 +68,14 @@ ${FRAMEWORK_CSS ? `<link rel="stylesheet" href="${encodeURI(FRAMEWORK_CSS)}">` :
     await page.close();
   }
 
-  const format = opts.format || "bmp";
-  const outputFile = join(SCREENS_DIR, `screen-${Date.now()}.${format}`);
+  const ext = model.mimeType === "image/bmp" ? "bmp" : "png";
+  const outputFile = join(SCREENS_DIR, `tmp-out-${Date.now()}.${ext}`);
 
-  await convertForEink(pngPath, outputFile, opts);
+  await convertForEink(pngPath, outputFile, model);
 
   const outputData = await readFile(outputFile);
-  const checksum = createHash("md5").update(outputData).digest("hex").slice(0, 12);
-  const finalFile = `screen-${checksum}.${format}`;
+  const checksum = createHash("md5").update(outputData).digest("hex");
+  const finalFile = `${screenName}-${checksum}.${ext}`;
   const finalPath = join(SCREENS_DIR, finalFile);
 
   await execFile("mv", [outputFile, finalPath]);
@@ -91,47 +87,106 @@ ${FRAMEWORK_CSS ? `<link rel="stylesheet" href="${encodeURI(FRAMEWORK_CSS)}">` :
 async function convertForEink(
   input: string,
   output: string,
-  opts: RenderOptions,
+  model: DeviceModel,
 ): Promise<void> {
   const args: string[] = [input];
+  const { bitDepth, width, height, rotation, offsetX, offsetY, colors } = model;
+  const dither = true;
 
-  if (opts.rotation) {
-    args.push("-rotate", String(opts.rotation));
+  if (rotation !== 0) {
+    args.push("-rotate", String(rotation));
   }
 
-  args.push("-resize", `${opts.width}x${opts.height}!`);
+  args.push("-resize", `${width}x${height}!`);
+
+  if (offsetX > 0 || offsetY > 0) {
+    args.push("-crop", `${width}x${height}+${offsetX}+${offsetY}`);
+  }
+
   args.push("-alpha", "off");
 
-  if (opts.bitDepth === 1) {
-    // 1-bit monochrome — Floyd-Steinberg dither, same as Terminus Ruby
-    args.push(
-      "-colorspace", "Gray",
-      "-fill", "gray50", "-opaque", "none",
-      "-dither", "FloydSteinberg",
-      "-remap", "pattern:gray50",
-      "-depth", "1",
-    );
-  } else if (opts.bitDepth <= 4) {
-    // 2-4 bit grayscale with dithering
-    const colors = Math.pow(2, opts.bitDepth);
-    args.push(
-      "-colorspace", "Gray",
-      "-dither", "FloydSteinberg",
-      "+dither",
-      "-posterize", String(colors),
-      "-depth", String(opts.bitDepth),
-    );
+  if (dither) {
+    if (bitDepth === 1) {
+      args.push(
+        "-dither", "FloydSteinberg",
+        "-remap", "pattern:gray50",
+        "-depth", "1",
+      );
+    } else if (bitDepth <= 4) {
+      const grays = colors || Math.pow(2, bitDepth);
+      args.push(
+        "-colorspace", "Gray",
+        "-dither", "FloydSteinberg",
+        "-posterize", String(grays),
+        "-depth", String(bitDepth),
+      );
+    } else {
+      args.push(
+        "-type", "Grayscale",
+        "-depth", "8",
+      );
+    }
   } else {
-    // 8-bit grayscale
-    args.push(
-      "-colorspace", "Gray",
-      "-depth", "8",
-    );
+    if (bitDepth === 1) {
+      args.push(
+        "-monochrome",
+        "-colors", String(colors || 2),
+        "-depth", "1",
+      );
+    } else {
+      const grays = colors || Math.pow(2, bitDepth);
+      args.push(
+        "-colorspace", "Gray",
+        "-dither", "None",
+        "-posterize", String(grays),
+        "-depth", String(bitDepth),
+      );
+    }
   }
 
-  args.push("-strip", output);
+  args.push("-strip");
+
+  const prefix = model.mimeType === "image/bmp" ? "bmp:" : "";
+  args.push(`${prefix}${output}`);
 
   await execFile("convert", args);
+}
+
+export async function renderErrorScreen(
+  message: string,
+  model: DeviceModel,
+  screenName: string,
+): Promise<{ path: string; checksum: string }> {
+  const errorHtml = `
+<div class="view">
+  <div class="layout layout--col gap--large" style="padding:40px">
+    <span class="value value--large">Error</span>
+    <span class="description">${message.replace(/</g, "&lt;")}</span>
+  </div>
+</div>
+<div class="title_bar">
+  <span class="title">Terminus</span>
+</div>`;
+
+  return renderScreen(errorHtml, {}, model, screenName);
+}
+
+export async function renderSleepScreen(
+  model: DeviceModel,
+  screenName: string,
+): Promise<{ path: string; checksum: string }> {
+  const sleepHtml = `
+<div class="view" style="display:flex;align-items:center;justify-content:center;height:100%">
+  <span class="value value--xlarge" style="opacity:0.3">sleeping</span>
+</div>`;
+
+  return renderScreen(sleepHtml, {}, model, screenName);
+}
+
+export async function compressBmpToPng(bmpPath: string): Promise<string> {
+  const pngPath = bmpPath.replace(/\.bmp$/, ".png");
+  await execFile("convert", [bmpPath, pngPath]);
+  return pngPath;
 }
 
 export async function shutdownRenderer(): Promise<void> {

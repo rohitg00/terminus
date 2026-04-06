@@ -1,4 +1,3 @@
-import "./iii.js";
 import { useApi, ok } from "./iii.js";
 import { registerDeviceEndpoints } from "./devices.js";
 import { registerExtensionEndpoints } from "./extensions.js";
@@ -16,10 +15,13 @@ useApi("health", "GET", async () => ok({
   timestamp: new Date().toISOString(),
 }), "Health check");
 
-process.on("SIGTERM", async () => {
+const shutdown = async () => {
   try { await shutdownRenderer(); }
   catch (err) { console.error("Shutdown error:", err); }
   process.exit(0);
-});
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 console.log("Terminus (iii-engine) — TRMNL BYOS server ready");
