@@ -30,8 +30,12 @@ function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+const MAC_PATTERN = /^[a-fA-F0-9:.\-_]{6,30}$/;
+
 function extractMac(req: ApiRequest): string {
-  return req.headers?.id || req.headers?.http_id || "";
+  const raw = req.headers?.id || req.headers?.http_id || "";
+  if (!raw || !MAC_PATTERN.test(raw)) return "";
+  return raw;
 }
 
 export async function registerDeviceEndpoints(): Promise<void> {
@@ -77,7 +81,7 @@ export async function registerDeviceEndpoints(): Promise<void> {
       body: {
         api_key: device.apiKey,
         friendly_id: device.friendlyId,
-        image_url: `${API_URI}/api/screens/${mac}/welcome.png`,
+        image_url: `${API_URI}/api/screens/${encodeURIComponent(mac)}/welcome.png`,
         message: `Device ${device.friendlyId} provisioned.`,
       },
     };
@@ -113,7 +117,7 @@ export async function registerDeviceEndpoints(): Promise<void> {
       const screen = await state.get<{ imagePath: string }>({ scope: "screens", key: playlist.items[idx].screenId });
 
       if (screen) {
-        imageUrl = `${API_URI}/api/screens/${mac}/${screen.imagePath}`;
+        imageUrl = `${API_URI}/api/screens/${encodeURIComponent(mac)}/${screen.imagePath}`;
         filename = screen.imagePath;
       }
 
@@ -148,7 +152,7 @@ export async function registerDeviceEndpoints(): Promise<void> {
     await state.set({
       scope: LOGS_SCOPE,
       key: `${mac}-${Date.now()}`,
-      data: { mac, ...body, timestamp: now() },
+      data: { ...body, mac, timestamp: now() },
     });
 
     return { status: 204 };
