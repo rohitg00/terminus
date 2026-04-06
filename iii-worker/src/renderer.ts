@@ -1,7 +1,7 @@
 import { chromium, type Browser } from "playwright";
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { Liquid } from "liquidjs";
@@ -60,16 +60,16 @@ ${FRAMEWORK_CSS ? `<link rel="stylesheet" href="${encodeURI(FRAMEWORK_CSS)}">` :
 
   let pngPath: string;
   try {
-    await page.setContent(fullHtml, { waitUntil: "networkidle" });
+    await page.setContent(fullHtml, { waitUntil: "networkidle", timeout: 30_000 });
     const screenshot = await page.screenshot({ type: "png" });
-    pngPath = join(SCREENS_DIR, `tmp-${Date.now()}.png`);
+    pngPath = join(SCREENS_DIR, `tmp-${randomUUID()}.png`);
     await writeFile(pngPath, screenshot);
   } finally {
     await page.close();
   }
 
   const ext = model.mimeType === "image/bmp" ? "bmp" : "png";
-  const outputFile = join(SCREENS_DIR, `tmp-out-${Date.now()}.${ext}`);
+  const outputFile = join(SCREENS_DIR, `tmp-out-${randomUUID()}.${ext}`);
 
   await convertForEink(pngPath, outputFile, model);
 
