@@ -75,7 +75,8 @@ ${FRAMEWORK_CSS ? `<link rel="stylesheet" href="${encodeURI(FRAMEWORK_CSS)}">` :
 
   const outputData = await readFile(outputFile);
   const checksum = createHash("md5").update(outputData).digest("hex");
-  const finalFile = `${screenName}-${checksum}.${ext}`;
+  const safeName = screenName.replace(/[^a-z0-9_\-]/gi, "_");
+  const finalFile = `${safeName}-${checksum}.${ext}`;
   const finalPath = join(SCREENS_DIR, finalFile);
 
   await execFile("mv", [outputFile, finalPath]);
@@ -184,14 +185,20 @@ export async function renderSleepScreen(
 }
 
 export async function compressBmpToPng(bmpPath: string): Promise<string> {
+  if (!bmpPath.endsWith(".bmp")) throw new Error("compressBmpToPng requires a .bmp input");
   const pngPath = bmpPath.replace(/\.bmp$/, ".png");
   await execFile("convert", [bmpPath, pngPath]);
   return pngPath;
 }
 
 export async function shutdownRenderer(): Promise<void> {
+  if (launching) {
+    try { await launching; }
+    catch { /* launch failed, nothing to close */ }
+  }
   if (browser) {
     await browser.close();
     browser = null;
   }
+  launching = null;
 }

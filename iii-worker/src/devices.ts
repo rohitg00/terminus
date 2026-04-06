@@ -94,12 +94,13 @@ async function syncSensors(deviceId: string, sensorsJson: string): Promise<void>
       if (!s.make || !s.model || !s.kind) continue;
       const key = `${deviceId}-${s.make}-${s.model}-${s.kind}`;
       const existing = await state.get<DeviceSensor>({ scope: SENSORS, key });
-      if (existing) continue;
-      const sensor: DeviceSensor = {
-        id: key, deviceId, make: s.make, model: s.model,
-        kind: s.kind, value: Number(s.value) || 0, unit: s.unit || "",
-        source: "device", createdAt: now(),
-      };
+      const sensor: DeviceSensor = existing
+        ? { ...existing, value: Number(s.value) || 0, unit: s.unit || existing.unit }
+        : {
+            id: key, deviceId, make: s.make, model: s.model,
+            kind: s.kind, value: Number(s.value) || 0, unit: s.unit || "",
+            source: "device", createdAt: now(),
+          };
       await state.set({ scope: SENSORS, key, data: sensor });
     }
   } catch { /* invalid json */ }
@@ -220,7 +221,8 @@ export async function registerDeviceEndpoints(): Promise<void> {
         } else {
           // Automatic: find next item after current position
           const sorted = [...playlist.items].sort((a, b) => a.position - b.position);
-          let nextItem = sorted.find(i => i.position > playlist.currentItemPosition);
+          const currentPos = playlist.currentItemId ? playlist.currentItemPosition : 0;
+          let nextItem = sorted.find(i => i.position > currentPos);
           if (!nextItem) nextItem = sorted[0]; // wrap around
 
           if (nextItem) {

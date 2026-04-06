@@ -68,6 +68,9 @@ export function registerPlaylistEndpoints(): void {
     if (playlist.currentItemId === itemId) {
       playlist.currentItemId = playlist.items[0]?.id || null;
       playlist.currentItemPosition = 1;
+    } else if (playlist.currentItemId) {
+      const current = playlist.items.find(i => i.id === playlist.currentItemId);
+      if (current) playlist.currentItemPosition = current.position;
     }
     playlist.updatedAt = now();
     await state.set({ scope: SCOPE, key: id, data: playlist });
